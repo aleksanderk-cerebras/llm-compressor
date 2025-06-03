@@ -4,6 +4,8 @@ import torch
 from compressed_tensors.quantization.quant_args import QuantizationArgs
 from compressed_tensors.quantization.utils import calculate_qparams
 from compressed_tensors.utils import deprecated
+from compressed_tensors.quantization import QuantizationStrategy
+from copy import copy
 
 from llmcompressor.observers.base import Observer
 
@@ -52,7 +54,22 @@ class MinMaxObserver(Observer):
         tensor_id = tensor_id or "default"
 
         if not reduce_dims:
-            min_val, max_val = torch.aminmax(observed)
+            seq_len = observed.shape[2]
+            num_heads = observed.shape[1]
+            GROUP_SIZE = 8
+            num_groups = observed.shape[3] // GROUP_SIZE
+            reshaped = observed.moveaxis(2, 3).contiguous()
+            reshaped = reshaped.view(num_heads, num_groups, -1)
+            #print(f"reshaped: {reshaped.shape}")
+            #print(f"quantization_args: {self.quantization_args}")
+            #quantization_args = copy(self.quantization_args)
+            #quantization_args.strategy = QuantizationStrategy.CHANNEL
+
+            # TODO: quantize part from few heads together (not from one head)
+            min_val = torch.amin(reshaped, dim=-1, keepdims=False).unsqueeze(0).unsqueeze(2)
+            min_val = torch.repeat_interleave(min_val, GROUP_SIZE, dim=3)
+            max_val = torch.amax(reshaped, dim=-1, keepdims=False).unsqueeze(0).unsqueeze(2)
+            max_val = torch.repeat_interleave(max_val, GROUP_SIZE, dim=3)
         else:
             min_val = torch.amin(observed, dim=reduce_dims, keepdims=True)
             max_val = torch.amax(observed, dim=reduce_dims, keepdims=True)
