@@ -30,6 +30,7 @@ class MinMaxObserver(Observer):
         self.min_val = {}
         self.max_val = {}
         self.averaging_constant = averaging_constant
+        print(f"quantization_args: {self.quantization_args}")
 
     def calculate_qparams(
         self,
@@ -66,13 +67,16 @@ class MinMaxObserver(Observer):
             #quantization_args.strategy = QuantizationStrategy.CHANNEL
 
             # TODO: quantize part from few heads together (not from one head)
-            min_val = torch.amin(reshaped, dim=-1, keepdims=False).unsqueeze(0).unsqueeze(2)
+            min_val = torch.amin(reshaped, dim=-1, keepdims=False).unsqueeze(0).unsqueeze(2) #688 651 924
             min_val = torch.repeat_interleave(min_val, GROUP_SIZE, dim=3)
             max_val = torch.amax(reshaped, dim=-1, keepdims=False).unsqueeze(0).unsqueeze(2)
             max_val = torch.repeat_interleave(max_val, GROUP_SIZE, dim=3)
         else:
             min_val = torch.amin(observed, dim=reduce_dims, keepdims=True)
             max_val = torch.amax(observed, dim=reduce_dims, keepdims=True)
+
+        # print(f"min_val: {min_val}")
+        # print(f"max_val: {max_val}")
 
         # early stopping, save some computation and memory
         if self.averaging_constant == 1.0:
@@ -100,12 +104,14 @@ class MinMaxObserver(Observer):
         self.min_val[tensor_id] = updated_min_val
         self.max_val[tensor_id] = updated_max_val
 
-        return calculate_qparams(
+        qparams = calculate_qparams(
             min_vals=updated_min_val,
             max_vals=updated_max_val,
             quantization_args=self.quantization_args,
             global_scale=global_scale,
         )
+        #print(f"qparams: {qparams}")
+        return qparams
 
     def get_qparams_along_dim(
         self,
