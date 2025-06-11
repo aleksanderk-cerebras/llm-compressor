@@ -54,6 +54,6 @@ oneshot(
 )
 
 # Save quantized model: Llama-3.1-8B-Instruct-FP8-KV
-SAVE_DIR = "/mlf8-shared/aleksanderk/Llama-3.1-8B-Instruct-INT8-KV"
+SAVE_DIR = "/mlf8-shared/aleksanderk/Llama-3.1-8B-Instruct-INT8-KV-2_HEADS"
 model.save_pretrained(SAVE_DIR, save_compressed=True)
 tokenizer.save_pretrained(SAVE_DIR)

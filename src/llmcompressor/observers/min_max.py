@@ -57,20 +57,39 @@ class MinMaxObserver(Observer):
         if not reduce_dims:
             seq_len = observed.shape[2]
             num_heads = observed.shape[1]
-            GROUP_SIZE = 8
-            num_groups = observed.shape[3] // GROUP_SIZE
+            feature_dim = observed.shape[3]
+            GROUP_SIZE = 4  # 4 elements per head in each group
+            COLLOCATED_HEADS = 2
+            
+            # Ensure num_heads is even for pairing
+            assert num_heads % COLLOCATED_HEADS == 0, "Number of heads must be even for pairing"
+            assert feature_dim % GROUP_SIZE == 0, "Feature dimension must be divisible by GROUP_SIZE"
+            
+            num_head_pairs = num_heads // COLLOCATED_HEADS
+            num_groups = feature_dim // GROUP_SIZE
+            
+            # Move seq_len to last dimension: (batch, num_heads, feature_dim, seq_len)
             reshaped = observed.moveaxis(2, 3).contiguous()
-            reshaped = reshaped.view(num_heads, num_groups, -1)
-            #print(f"reshaped: {reshaped.shape}")
-            #print(f"quantization_args: {self.quantization_args}")
-            #quantization_args = copy(self.quantization_args)
-            #quantization_args.strategy = QuantizationStrategy.CHANNEL
-
-            # TODO: quantize part from few heads together (not from one head)
-            min_val = torch.amin(reshaped, dim=-1, keepdims=False).unsqueeze(0).unsqueeze(2) #688 651 924
-            min_val = torch.repeat_interleave(min_val, GROUP_SIZE, dim=3)
-            max_val = torch.amax(reshaped, dim=-1, keepdims=False).unsqueeze(0).unsqueeze(2)
-            max_val = torch.repeat_interleave(max_val, GROUP_SIZE, dim=3)
+            
+            # Reshape to pair heads and group features: (batch, num_head_pairs, 2, num_groups, GROUP_SIZE, seq_len)
+            reshaped = reshaped.view(observed.shape[0], num_head_pairs, COLLOCATED_HEADS, num_groups, GROUP_SIZE, seq_len)
+            reshaped = reshaped.moveaxis(2, 3).contiguous()
+            
+            # Reshape to compute min/max across 8 elements (2 heads * GROUP_SIZE elements each)
+            # Final shape: (num_head_pairs, num_groups, batch * 2 * GROUP_SIZE * seq_len)
+            reshaped = reshaped.view(num_head_pairs, num_groups, -1)
+            
+            min_val = torch.amin(reshaped, dim=-1, keepdims=False)  # (num_head_pairs, num_groups)
+            max_val = torch.amax(reshaped, dim=-1, keepdims=False)  # (num_head_pairs, num_groups)
+            
+            # Expand back to original head structure
+            min_val = torch.repeat_interleave(min_val, COLLOCATED_HEADS, dim=0)
+            min_val = min_val.reshape(num_heads, num_groups).unsqueeze(0).unsqueeze(2)  # (1, num_heads, 1, num_groups)
+            min_val = torch.repeat_interleave(min_val, GROUP_SIZE, dim=3)  # (1, num_heads, 1, feature_dim)
+            
+            max_val = torch.repeat_interleave(max_val, COLLOCATED_HEADS, dim=0)
+            max_val = max_val.reshape(num_heads, num_groups).unsqueeze(0).unsqueeze(2)  # (1, num_heads, 1, num_groups)
+            max_val = torch.repeat_interleave(max_val, GROUP_SIZE, dim=3)  # (1, num_heads, 1, feature_dim)
         else:
             min_val = torch.amin(observed, dim=reduce_dims, keepdims=True)
             max_val = torch.amax(observed, dim=reduce_dims, keepdims=True)
